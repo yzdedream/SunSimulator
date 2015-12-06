@@ -1,11 +1,16 @@
-package com.kelvinyang.sunsimulator;
+package com.kelvinyang.sunsimulator.activity;
 
 import android.os.Build;
+import android.os.Handler;
+import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
+import android.widget.TextView;
 
+import com.kelvinyang.sunsimulator.R;
+import com.kelvinyang.sunsimulator.mapping.TimeMapper;
 import com.philips.lighting.hue.sdk.PHAccessPoint;
 import com.philips.lighting.hue.sdk.PHBridgeSearchManager;
 import com.philips.lighting.hue.sdk.PHHueSDK;
@@ -16,7 +21,12 @@ import com.philips.lighting.model.PHHueParsingError;
 import com.philips.lighting.model.PHLight;
 import com.philips.lighting.model.PHLightState;
 
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class SettingActivity extends AppCompatActivity {
     private static String appName;
@@ -28,6 +38,8 @@ public class SettingActivity extends AppCompatActivity {
     private List<PHLight> lights;
     private PHLight sun;
 
+    private TextView time;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -36,6 +48,8 @@ public class SettingActivity extends AppCompatActivity {
     }
 
     private void initialize() {
+        time = (TextView) findViewById(R.id.tv_time);
+
         appName = getResources().getString(R.string.app_name);
         phHueSDK = PHHueSDK.getInstance();
         phHueSDK.setAppName(appName);
@@ -43,7 +57,7 @@ public class SettingActivity extends AppCompatActivity {
         //startBridgeSearch();
         setLitsener();
         connectKnownBridge();
-       // getLights();
+        // getLights();
         //findSun();
     }
 
@@ -51,19 +65,108 @@ public class SettingActivity extends AppCompatActivity {
         int id = view.getId();
         switch (id) {
             case R.id.btn:
-                changeLightState();
+                changeLightState(1, 500);
+                break;
+            case R.id.btn_time_travel:
+                startTimeTravel();
+                disableTimerTravelButton();
                 break;
 
         }
     }
 
-    private void changeLightState() {
+    private void disableTimerTravelButton() {
+        Button b = (Button) findViewById(R.id.btn_time_travel);
+        b.setEnabled(false);
+    }
+
+    private Handler handler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            super.handleMessage(msg);
+            calendar.add(Calendar.MINUTE, 10);
+            uiUpdateTime();
+            changeLightState(getBrightness(), getCT());
+        }
+    };
+
+    private int getCT() {
+        // f(x) = 1.05 sin(0.261799x -1.5707963)
+        TimeMapper timeMapper = new TimeMapper(1.1, 0.261799, -1.5707963);
+
+        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+        int minute = calendar.get(Calendar.MINUTE);
+        double ctFactor = timeMapper.map(hour, minute);
+        double ctMax = 500;
+        double ctMin = 153;
+        double delta = ctMax - ctMin;
+
+        Double ct = ctMax - delta * ctFactor;
+
+        return ct.intValue();
+    }
+
+    private int getBrightness() {
+        // f(x) = 1.05 sin(0.261799x -1.5707963)
+        TimeMapper timeMapper = new TimeMapper(1.05, 0.261799, -1.5707963);
+
+        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+        int minute = calendar.get(Calendar.MINUTE);
+        double brightnessFactor = timeMapper.map(hour, minute);
+
+        if (brightnessFactor < 0) {
+            return 0;
+        }
+        if (brightnessFactor > 1) {
+            brightnessFactor = 1;
+        }
+
+        int maxBrightness = 254;
+        Double brightness = maxBrightness * brightnessFactor;
+        return brightness.intValue();
+    }
+
+    private Calendar calendar;
+
+    private void startTimeTravel() {
+        calendar = Calendar.getInstance();
+        calendar.set(Calendar.HOUR_OF_DAY, 6);
+
+        uiUpdateTime();
+        startTimer();
+    }
+
+    private void startTimer() {
+        Timer timer = new Timer();
+        TimerTask timerTask = new TimerTask() {
+            @Override
+            public void run() {
+                handler.sendEmptyMessage(0);
+            }
+        };
+        timer.schedule(timerTask, 0, 1000);
+    }
+
+    private static SimpleDateFormat simpleDateFormat = new SimpleDateFormat("hh:mm");
+
+    private void uiUpdateTime() {
+        String s = simpleDateFormat.format(calendar.getTime());
+        this.time.setText(s);
+    }
+
+    private void changeLightState(int brightness, int ct) {
+
         PHBridge bridge = phHueSDK.getSelectedBridge();
         PHLightState phLightState = new PHLightState();
-        phLightState.setCt(500);
-        phLightState.setBrightness(1);
+        phLightState.setCt(ct);
+        phLightState.setBrightness(brightness);
 
-        bridge.updateLightState(sun,phLightState);
+        if (brightness > 0) {
+            phLightState.setOn(true);
+        } else {
+            phLightState.setOn(false);
+        }
+        bridge.updateLightState(sun, phLightState);
     }
 
     private void connectKnownBridge() {
@@ -90,15 +193,15 @@ public class SettingActivity extends AppCompatActivity {
 
         for (PHLight light : lights) {
             String name = light.getName();
-            if ("Sun".equals(name)){
+            if ("Sun".equals(name)) {
                 this.sun = light;
                 enableButton();
             }
         }
     }
 
-    private void enableButton(){
-        Button button = (Button)findViewById(R.id.btn);
+    private void enableButton() {
+        Button button = (Button) findViewById(R.id.btn);
         button.setEnabled(true);
     }
 
